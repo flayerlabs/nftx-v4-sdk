@@ -1,0 +1,5 @@
+# Standalone pnpm workspace root for @flayerlabs/nftx-v4-sdk.
+# Changesets discovers publishable packages through the pnpm workspace, so the
+# root package must be included explicitly.
+packages:
+  - .

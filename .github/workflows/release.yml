@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm publishing to npm'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  # Required for npm trusted publishing (OIDC). Without this the publish step
+  # cannot mint an identity token and npm falls back to token auth.
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Require explicit confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [[ "$CONFIRM" != "publish" ]]; then
+            echo "Refusing to publish: confirmation input was not 'publish'." >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.3
+          run_install: false
+
+      # Deliberately no `registry-url`: actions/setup-node writes an _authToken
+      # line into .npmrc when it is set, which breaks the trusted-publishing
+      # OIDC flow whenever NODE_AUTH_TOKEN is absent.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          cache: pnpm
+
+      # Trusted publishing requires npm >= 11.5.1.
+      - name: Use an npm that supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify the package before publishing
+        run: pnpm check
+
+      - name: Refuse to publish an unversioned package
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "package version: $VERSION"
+          if [[ "$VERSION" == "0.0.0" ]]; then
+            echo "Version is still 0.0.0 — run 'pnpm version-packages' and commit first." >&2
+            exit 1
+          fi
+          if [[ -n "$(ls .changeset/*.md 2>/dev/null | grep -v README)" ]]; then
+            echo "Unconsumed changesets remain — run 'pnpm version-packages' and commit first." >&2
+            exit 1
+          fi
+
+      # npm publish (not `changeset publish`) so the OIDC flow is the one npm
+      # documents. `prepack` builds dist. Provenance comes from publishConfig.
+      - name: Publish
+        run: npm publish

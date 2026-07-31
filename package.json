@@ -1,0 +1,88 @@
+{
+  "name": "@flayerlabs/nftx-v4-sdk",
+  "version": "0.1.0",
+  "description": "Strict TypeScript SDK for NFTX v4 on Ethereum and Base: canonical deployments, quotes, transaction plans, guarded calldata, and viem-backed execution.",
+  "packageManager": "pnpm@10.34.3",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/flayerlabs/nftx-v4-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/flayerlabs/nftx-v4-sdk/issues"
+  },
+  "homepage": "https://github.com/flayerlabs/nftx-v4-sdk#readme",
+  "keywords": [
+    "nftx",
+    "nft",
+    "amm",
+    "base",
+    "viem",
+    "ethereum",
+    "sdk",
+    "uniswap-v4"
+  ],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./abi": {
+      "types": "./dist/abi/index.d.ts",
+      "import": "./dist/abi/index.js"
+    },
+    "./addresses": {
+      "types": "./dist/addresses/index.d.ts",
+      "import": "./dist/addresses/index.js"
+    },
+    "./constants": {
+      "types": "./dist/constants/index.d.ts",
+      "import": "./dist/constants/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "check": "pnpm typecheck && pnpm test && pnpm check:abi-hashes && pnpm build && pnpm check:exports && pnpm check:package",
+    "check:package": "publint --strict && node scripts/check-types-package.mjs",
+    "check:exports": "node scripts/check-package-exports.mjs && tsc -p tsconfig.public.json",
+    "check:abi-hashes": "node scripts/check-abi-hashes.mjs",
+    "pack:dry-run": "pnpm pack --dry-run",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "prepack": "pnpm build",
+    "release": "pnpm check && changeset publish"
+  },
+  "peerDependencies": {
+    "viem": ">=2.31 <3"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.3",
+    "@changesets/cli": "2.31.0",
+    "@vitest/coverage-v8": "4.1.8",
+    "publint": "0.3.21",
+    "tsdown": "0.22.3",
+    "typescript": "^5",
+    "viem": "2.52.0",
+    "vitest": "4.1.8"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
