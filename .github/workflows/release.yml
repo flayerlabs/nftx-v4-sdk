@@ -44,10 +44,13 @@ jobs:
       # Deliberately no `registry-url`: actions/setup-node writes an _authToken
       # line into .npmrc when it is set, which breaks the trusted-publishing
       # OIDC flow whenever NODE_AUTH_TOKEN is absent.
+      # Trusted publishing needs Node >= 22.14.0, but current npm majors require
+      # a newer 22.x still, so track the latest 22.x rather than pinning a
+      # minimum that npm@latest has already outgrown.
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22.14.0
+          node-version: 22
           cache: pnpm
 
       # Trusted publishing requires npm >= 11.5.1.
