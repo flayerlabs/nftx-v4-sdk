@@ -87,11 +87,16 @@ surplus-token behaviour. Consumer UI should make this distinction visible.
 
 ## Supported deployments
 
-The trading address book follows the frontend snapshot at `8676fb6`, checked
+The protocol address book follows the frontend snapshot at `8676fb6`, checked
 against deployed code and Locker/hook/zap/Uniswap wiring. Ethereum retains its
 v3.0.0 zap; later protocol releases also have a newer zap at a different address.
 This release follows the frontend's trading targets rather than migrating its
 transactions to that newer zap.
+
+Universal Router addresses follow frontend snapshot `3c32c66`: version 2.1.2
+on every listed chain except Robinhood testnet, which retains its deployed 2.1.1
+router. The mainnet 2.1.2 address has no code on that testnet; routes targeting
+it are refused. Contract deployment does not imply availability through a quote API.
 
 | Chain | ID | Trade and plan surface | Notes |
 | --- | ---: | --- | --- |
@@ -167,24 +172,116 @@ settlement or an ETH refund.
 Routed swaps use three small helpers:
 
 1. `routedSwapQuoteRequest(intent)` creates an exact-input quote request.
-2. `prepareRoutedSwap(intent, quote, approval, contracts)` returns exact-amount
+2. `prepareRoutedSwap(intent, quote, approval, contracts)` returns guarded
    approval steps and optional `permitTypedData` to sign with viem.
 3. `resolveRoutedSwap({ intent, quote, contracts, provider, signature })` returns
    a write `PlanStep`, refreshing a stale quote while preserving its output floor.
 
-Use `getAddressFor(chainId, 'permit2')` and
-`getAddressFor(chainId, 'universalRouter')` for the contract pair. Run approvals
-and wait for their successful receipts, sign any returned Permit2 payload, then
-resolve and execute the swap through `runStagedPlan` with `createCallGuard`.
-These helpers do not broadcast or add an API, React or wallet-framework dependency.
+Set `intent.permitAmount: 'FULL'` for frontend parity. This requests a sufficient
+Permit2 authorization (typically maximum uint160) and preserves the upstream
+ERC20 approval amount, including unlimited approvals. Both may remain usable
+after this swap. Expose these amounts to the user before signing. Omitting this
+option, or choosing `'EXACT'`, keeps the existing policy: the permit must equal
+`amountIn` and ERC20 approvals are capped to that amount. Keep the same intent
+and policy through quote, preparation and resolution.
+
+Sign the returned typed data before executing approvals. For example, with the
+wallet already on `intent.chainId` and connected as `intent.account`:
+
+```ts
+import {
+  getAddressFor,
+  prepareRoutedSwap,
+  resolveRoutedSwap,
+  routedSwapQuoteRequest,
+  type RoutedSwapIntent,
+} from '@flayerlabs/nftx-v4-sdk'
+
+const intent: RoutedSwapIntent = {
+  chainId, account, tokenIn, tokenOut, amountIn, slippageBps: 100,
+  permitAmount: 'FULL',
+}
+const contracts = {
+  permit2: getAddressFor(chainId, 'permit2'),
+  universalRouter: getAddressFor(chainId, 'universalRouter'),
+}
+const quote = await provider.requestQuote(routedSwapQuoteRequest(intent), chainId)
+// `approval` is the adapter's check-approval response (null for native input).
+const prepared = prepareRoutedSwap(intent, quote, approval, contracts)
+const signature = prepared.permitTypedData
+  ? await walletClient.signTypedData({ account, ...prepared.permitTypedData })
+  : undefined
+const resolution = {
+  intent, quote, contracts, provider,
+  ...(signature ? { signature } : {}),
+}
+```
+
+On a wallet with confirmed atomic ERC-5792 support, resolve immediately before
+the batch. Set `approvalsPending` only when the batch contains the pending
+approvals. The provider then skips simulation against the current allowance;
+the call guard still checks account, chain, contract code and approval targets.
+
+```ts
+import { createCallGuard, runBatch } from '@flayerlabs/nftx-v4-sdk'
+
+const swap = await resolveRoutedSwap({
+  ...resolution,
+  approvalsPending: prepared.approvalSteps.length > 0,
+})
+const result = await runBatch([...prepared.approvalSteps, swap], {
+  ...batchDeps, // app-owned wallet snapshot, chain switch, sendCalls and status wait
+  assertCallSafe: createCallGuard({
+    chainId, publicClient, walletClient, expectedAccount: account, contracts,
+    simulate: false,
+  }),
+})
+```
+
+For sequential wallets, wait for successful approval receipts, then resolve the
+swap at its turn. Leave `approvalsPending` unset so provider simulation runs.
+The guard also simulates each write just before submission:
+
+```ts
+import { createCallGuard, runStagedPlan } from '@flayerlabs/nftx-v4-sdk'
+
+const deps = {
+  ...sequentialDeps, // app-owned wallet snapshot, chain switch, write and receipt wait
+  assertCallSafe: createCallGuard({
+    chainId, publicClient, walletClient, expectedAccount: account, contracts,
+    simulate: true,
+  }),
+}
+const approvalsResult = await runStagedPlan(prepared.approvalSteps, deps)
+if (approvalsResult.status !== 'success') throw approvalsResult.error
+const swap = await resolveRoutedSwap(resolution)
+const result = await runStagedPlan([swap], deps)
+```
+
+The resolver refreshes quotes within five seconds of expiry, retains the signed
+permit only while its authorization remains compatible, and refuses a refreshed
+minimum below the confirmed floor. Reprepare and sign if the permit nonce changes
+or expires. Inspect executor results and reconcile submitted hashes or `callsId`
+before retrying an interrupted swap. These helpers keep transport, signing and
+wallet capability selection in the application.
 
 `TrustedRoutedSwapProvider` is an explicit trust boundary. Its calldata method
 receives the confirmed minimum output and must verify router command economics:
 the spend, token pair, recipient and on-chain output minimum. The SDK checks
-the quote, exact permit, account, chain, router, native value and deadlines; it
+the quote, selected permit policy, account, chain, router, native value and deadlines; it
 does not decode Uniswap's nested commands. A provider that only forwards opaque
 third-party calldata does not meet this contract. API chain availability belongs
 to the provider, and its selected router version must match the address supplied.
+Provider implementations must support `'EXACT' | 'FULL'` quote requests and a
+boolean `simulateTransaction` flag.
+
+The frontend obtains approvals, quotes and calldata through the NFTX backend's
+`/v1/{chain}/swaps/check-approval`, `/quote` and `/calldata` endpoints. Supply your
+own authenticated transport adapter; the SDK ships no HTTP client or API key
+handling. The `minimumAmountOut` argument to `requestCalldata` is an SDK provider
+contract, not a field in that backend's request body. An adapter must verify the
+returned command economics against that floor even when simulation is disabled;
+forwarding the request and accepting the returned transaction alone is insufficient.
 Routed swaps support exact-input `CLASSIC` Universal Router routes, matching the
 frontend's token-trading flow. Standalone wrap/unwrap routes are rejected before
 signing because they use different contract entrypoints.

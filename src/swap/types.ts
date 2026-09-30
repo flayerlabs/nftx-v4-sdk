@@ -8,6 +8,12 @@ export interface RoutedSwapIntent {
   tokenOut: Address
   amountIn: bigint
   slippageBps: number
+  /**
+   * EXACT (default) caps both the permit and ERC20 approval to amountIn.
+   * FULL matches the frontend: accepts a sufficient Permit2 amount (typically
+   * uint160 max) and preserves the provider's ERC20 approval, including unlimited.
+   */
+  permitAmount?: 'EXACT' | 'FULL'
 }
 
 export interface RoutedSwapContracts {
@@ -38,7 +44,7 @@ export interface RoutedSwapQuoteRequest {
   recipient: Address
   slippageBps: number
   generatePermitAsTransaction: false
-  permitAmount: 'EXACT'
+  permitAmount: 'EXACT' | 'FULL'
 }
 
 export interface RoutedSwapQuote {
@@ -85,7 +91,7 @@ export interface RoutedSwapCalldataRequest {
     | 'expiresAt'
   > & { recipient: Address }
   refreshGasPrice: true
-  simulateTransaction: true
+  simulateTransaction: boolean
 }
 
 /**

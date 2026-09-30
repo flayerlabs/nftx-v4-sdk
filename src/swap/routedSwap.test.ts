@@ -1,8 +1,22 @@
-import { encodeFunctionData, erc20Abi, maxUint256, zeroAddress, type Address } from 'viem'
+import {
+  decodeFunctionData,
+  encodeFunctionData,
+  erc20Abi,
+  maxUint160,
+  maxUint256,
+  zeroAddress,
+  type Address,
+  type PublicClient,
+  type WalletClient,
+} from 'viem'
 import { describe, expect, it, vi } from 'vitest'
 
 import { universalRouterAbi } from '../abi/universalRouter'
+import { createCallGuard } from '../client/guards'
+import { runBatch } from '../execution/batch'
+import type { EncodedCall } from '../execution/encodeCalls'
 import { runStagedPlan } from '../execution/stagedPlan'
+import type { RoutedSwapPermitTypedData } from './permit'
 import { prepareRoutedSwap, resolveRoutedSwap, routedSwapQuoteRequest } from './routedSwap'
 import type {
   RoutedSwapApproval,
@@ -28,8 +42,9 @@ const intent: RoutedSwapIntent = {
   amountIn: 100n,
   slippageBps: 100,
 }
+const fullIntent: RoutedSwapIntent = { ...intent, permitAmount: 'FULL' }
 
-function permit() {
+function permit(amount = 100n) {
   return {
     domain: { name: 'Permit2', chainId: 1, verifyingContract: contracts.permit2 },
     types: {
@@ -46,7 +61,12 @@ function permit() {
       ],
     },
     values: {
-      details: { token: tokenIn, amount: '100', expiration: nowMs / 1000 + 900, nonce: '0' },
+      details: {
+        token: tokenIn,
+        amount: amount.toString(),
+        expiration: nowMs / 1000 + 900,
+        nonce: '0',
+      },
       spender: contracts.universalRouter,
       sigDeadline: String(nowMs / 1000 + 900),
     },
@@ -124,6 +144,54 @@ describe('routed swap preparation', () => {
       permitAmount: 'EXACT',
       recipient: account,
     })
+  })
+
+  it('explicitly requests frontend FULL permits without changing exact input or recipient', () => {
+    expect(routedSwapQuoteRequest(fullIntent)).toEqual({
+      ...routedSwapQuoteRequest(intent),
+      permitAmount: 'FULL',
+    })
+    expect(routedSwapQuoteRequest({ ...intent, permitAmount: 'EXACT' }).permitAmount).toBe('EXACT')
+    expect(() =>
+      routedSwapQuoteRequest({ ...intent, permitAmount: 'UNKNOWN' as 'FULL' }),
+    ).toThrow('parameters')
+  })
+
+  it.each([100n, 101n, maxUint160])('accepts a sufficient FULL PermitSingle amount %s', (amount) => {
+    const result = prepareRoutedSwap(
+      fullIntent,
+      quote({ permitData: permit(amount) }),
+      null,
+      contracts,
+      nowMs,
+    )
+    expect(result.permitTypedData?.message.details.amount).toBe(amount)
+  })
+
+  it.each([99n, maxUint160 + 1n])('rejects an invalid FULL permit amount %s', (amount) => {
+    expect(() =>
+      prepareRoutedSwap(fullIntent, quote({ permitData: permit(amount) }), null, contracts, nowMs),
+    ).toThrow()
+  })
+
+  it('refuses a FULL permit unless the intent explicitly allows it', () => {
+    expect(() =>
+      prepareRoutedSwap(intent, quote({ permitData: permit(maxUint160) }), null, contracts, nowMs),
+    ).toThrow('authorization')
+  })
+
+  it.each([101n, maxUint256])('preserves the upstream ERC20 approval %s in FULL mode', (amount) => {
+    const result = prepareRoutedSwap(
+      fullIntent,
+      quote({ permitData: permit(maxUint160) }),
+      { chainId: 1, cancel: approval(0n), approval: approval(amount) },
+      contracts,
+      nowMs,
+    )
+    expect(result.approvalSteps.map((step) => step.args)).toEqual([
+      [contracts.permit2, 0n],
+      [contracts.permit2, amount],
+    ])
   })
 
   it('builds an allowance reset followed by exact approval, reducing backend unlimited approvals', () => {
@@ -224,6 +292,12 @@ describe('routed swap preparation', () => {
       expect(() =>
         prepareRoutedSwap(intent, quote({ permitData: raw }), null, contracts, nowMs),
       ).toThrow()
+      if (field !== 'amount') {
+        raw.values.details.amount = maxUint160.toString()
+        expect(() =>
+          prepareRoutedSwap(fullIntent, quote({ permitData: raw }), null, contracts, nowMs),
+        ).toThrow()
+      }
     },
   )
 
@@ -341,6 +415,36 @@ describe('routed swap resolution', () => {
     expect(p.requestCalldata).not.toHaveBeenCalled()
   })
 
+  it.each(['new permit', 'permit transaction', 'weaker floor', 'underfunded permit'])(
+    'refuses an unsafe FULL quote refresh: %s',
+    async (change) => {
+      const original = quote({
+        permitData: change === 'new permit' ? null : permit(maxUint160),
+        expiresAt: new Date(nowMs + 5_000).toISOString(),
+      })
+      const fresh = quote({ permitData: permit(maxUint160) })
+      if (change === 'permit transaction') fresh.permitTransaction = approval(100n)
+      if (change === 'weaker floor') {
+        fresh.output = { token: tokenOut, amount: '199', minimumAmount: '197' }
+      }
+      if (change === 'underfunded permit') fresh.permitData = permit(99n)
+      const p = provider()
+      p.requestQuote = vi.fn(async () => fresh)
+      await expect(
+        resolveRoutedSwap({
+          intent: fullIntent,
+          contracts,
+          quote: original,
+          provider: p,
+          ...(original.permitData ? { signature: '0x1234' as const } : {}),
+          approvalsPending: true,
+          now: () => nowMs,
+        }),
+      ).rejects.toThrow()
+      expect(p.requestCalldata).not.toHaveBeenCalled()
+    },
+  )
+
   it('rejects a changed permit nonce after an approval delay', async () => {
     const raw = permit()
     const fresh = permit()
@@ -375,6 +479,17 @@ describe('routed swap resolution', () => {
     'rejects unsafe swap %j',
     async (change) => {
       await expect(resolve(quote(), provider(swap(change)))).rejects.toThrow()
+      await expect(
+        resolveRoutedSwap({
+          intent: fullIntent,
+          contracts,
+          quote: quote({ permitData: permit(maxUint160) }),
+          provider: provider(swap(change)),
+          signature: '0x1234',
+          approvalsPending: true,
+          now: () => nowMs,
+        }),
+      ).rejects.toThrow()
     },
   )
 
@@ -424,5 +539,153 @@ describe('routed swap resolution', () => {
     })
     expect(state).toMatchObject({ status: 'error', errorCode: 'TX_REVERTED' })
     expect(state.steps[0]?.txHash).toBe('0xsubmitted')
+  })
+})
+
+describe('routed swaps with existing executors', () => {
+  const wallet = { isConnected: true, address: account, chainId: 1 }
+  const approvals = { chainId: 1, cancel: approval(0n), approval: approval(maxUint256) }
+
+  function guard(
+    simulate: boolean,
+    simulateContract: (call: { functionName: string }) => Promise<unknown> = vi.fn(async () => ({})),
+  ) {
+    return createCallGuard({
+      chainId: 1,
+      contracts,
+      expectedAccount: account,
+      publicClient: {
+        chain: { id: 1 },
+        getCode: vi.fn(async () => '0x1234'),
+        simulateContract,
+      } as unknown as PublicClient,
+      walletClient: { chain: { id: 1 }, account: { address: account } } as unknown as WalletClient,
+      simulate,
+    })
+  }
+
+  it('signs first and submits reset, FULL approval and swap in one atomic batch', async () => {
+    const raw = permit(maxUint160)
+    const q = quote({ permitData: raw })
+    const prepared = prepareRoutedSwap(fullIntent, q, approvals, contracts, nowMs)
+    const sign = vi.fn(async (_typedData: RoutedSwapPermitTypedData) => '0x1234' as const)
+    const signature = await sign(prepared.permitTypedData!)
+    const p = provider()
+    const step = await resolveRoutedSwap({
+      intent: fullIntent,
+      quote: q,
+      contracts,
+      provider: p,
+      signature,
+      approvalsPending: prepared.approvalSteps.length > 0,
+      now: () => nowMs,
+    })
+    const simulateContract = vi.fn(async () => ({}))
+    const sendCalls = vi.fn(async (_calls: EncodedCall[]) => ({ id: '0xbatch' }))
+    const state = await runBatch([...prepared.approvalSteps, step], {
+      wallet,
+      chainId: 1,
+      switchChain: vi.fn(),
+      assertCallSafe: guard(false, simulateContract),
+      sendCalls,
+      waitForCallsStatus: vi.fn(async () => ({
+        status: 'success' as const,
+        atomic: true,
+        receipts: [{ transactionHash: '0xreceipt', status: 'success' as const }],
+      })),
+    })
+    expect(sign).toHaveBeenCalledWith(prepared.permitTypedData)
+    expect(sign.mock.invocationCallOrder[0]).toBeLessThan(sendCalls.mock.invocationCallOrder[0]!)
+    expect(p.requestCalldata).toHaveBeenCalledWith(
+      expect.objectContaining({ simulateTransaction: false, permitData: raw, signature }),
+      1,
+      198n,
+    )
+    expect(simulateContract).not.toHaveBeenCalled()
+    const calls = sendCalls.mock.calls[0]![0]
+    expect(calls.map((call) => call.to)).toEqual([tokenIn, tokenIn, contracts.universalRouter])
+    expect(decodeFunctionData({ abi: erc20Abi, data: calls[1]!.data }).args).toEqual([
+      contracts.permit2,
+      maxUint256,
+    ])
+    expect(state).toMatchObject({ status: 'success', execution: 'atomic', callsId: '0xbatch' })
+    expect(state.steps.map((view) => view.status)).toEqual(['done', 'done', 'done'])
+  })
+
+  it('signs before sequential approvals, then refreshes and simulates after successful receipts', async () => {
+    let time = nowMs
+    let mined = false
+    const events: string[] = []
+    const raw = permit(maxUint160)
+    const q = quote({ permitData: raw })
+    const prepared = prepareRoutedSwap(fullIntent, q, approvals, contracts, time)
+    const sign = async () => {
+      events.push('sign')
+      return '0x1234' as const
+    }
+    const signature = await sign()
+    const simulateContract = vi.fn(async (call: { functionName: string }) => {
+      if (call.functionName === 'execute') expect(mined).toBe(true)
+      events.push(`simulate:${call.functionName}`)
+      return {}
+    })
+    const deps = {
+      wallet,
+      chainId: 1,
+      switchChain: vi.fn(),
+      assertCallSafe: guard(true, simulateContract),
+      writeContract: vi.fn(async () => '0xsubmitted'),
+      waitForReceipt: vi.fn(async () => {
+        mined = true
+        time = nowMs + 31_000
+        events.push('receipt')
+        return { status: 'success' as const, transactionHash: '0xsubmitted' }
+      }),
+    }
+    const approvalState = await runStagedPlan(prepared.approvalSteps, deps)
+    expect(approvalState.status).toBe('success')
+    const p = provider()
+    p.requestQuote = vi.fn(async () => {
+      expect(mined).toBe(true)
+      events.push('quote')
+      return quote({
+        permitData: permit(maxUint160),
+        expiresAt: new Date(time + 30_000).toISOString(),
+      })
+    })
+    p.requestCalldata = vi.fn(async (request) => {
+      expect(mined).toBe(true)
+      expect(request.simulateTransaction).toBe(true)
+      events.push('calldata')
+      return { chainId: 1, swap: swap() }
+    })
+    const step = await resolveRoutedSwap({
+      intent: fullIntent,
+      quote: q,
+      contracts,
+      provider: p,
+      signature,
+      approvalsPending: false,
+      now: () => time,
+    })
+    const state = await runStagedPlan([step], deps)
+    expect(state).toMatchObject({ status: 'success', execution: 'sequential' })
+    expect(p.requestQuote).toHaveBeenCalledWith(routedSwapQuoteRequest(fullIntent), 1)
+    expect(p.requestCalldata).toHaveBeenCalledWith(
+      expect.objectContaining({ permitData: raw, signature }),
+      1,
+      198n,
+    )
+    expect(events).toEqual([
+      'sign',
+      'simulate:approve',
+      'receipt',
+      'simulate:approve',
+      'receipt',
+      'quote',
+      'calldata',
+      'simulate:execute',
+      'receipt',
+    ])
   })
 })

@@ -87,9 +87,11 @@ export function routedSwapPermitTypedData(
     address(domain.verifyingContract) !== parseAddress(contracts.permit2) ||
     message.spender !== parseAddress(contracts.universalRouter) ||
     message.details.token !== parseAddress(intent.tokenIn) ||
-    message.details.amount !== intent.amountIn
+    (intent.permitAmount === 'FULL'
+      ? message.details.amount < intent.amountIn
+      : message.details.amount !== intent.amountIn)
   ) {
-    throw new InvalidInputError('Permit2 authorization does not match the exact swap intent.')
+    throw new InvalidInputError('Permit2 authorization does not match the swap intent.')
   }
   const horizon = BigInt(Math.floor(nowMs / 1000) + 60)
   if (message.details.expiration < horizon || message.sigDeadline < horizon) {

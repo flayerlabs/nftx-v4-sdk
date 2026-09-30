@@ -19,10 +19,11 @@ import type { Address } from 'viem'
  * frontend book.
  * Missing contracts are omitted, never represented as live zero addresses.
  *
- * Uniswap addresses follow the same snapshot and the canonical deployment
- * tables: https://github.com/Uniswap/contracts/tree/main/deployments. Router
- * versions stay aligned with the frontend; Arc and Robinhood have newer routers
- * in the canonical table. Zap targets follow the frontend snapshot, which
+ * Universal Router addresses follow frontend commit
+ * 3c32c6652419b09df817320e794ce268b41d2d9e (2.1.2). Robinhood testnet retains
+ * 2.1.1: the mainnet 2.1.2 address has no code there. Other Uniswap addresses
+ * follow the original snapshot and https://github.com/Uniswap/contracts/tree/main/deployments.
+ * Zap targets follow the original frontend snapshot, which
  * still uses the v3.0.0 zap on Ethereum; this is not the latest periphery zap.
  */
 export type ChainId = number
@@ -108,7 +109,7 @@ export const ADDRESS_TABLES: Readonly<Record<ChainId, ChainContracts>> = freezeT
     poolManager: live('0x000000000004444c5dc75cB358380D2e3dE08A90'),
     positionManager: live('0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e'),
     quoter: live('0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203'),
-    universalRouter: live('0x66a9893cc07d91d95644aedd05d03f95e1dba8af'),
+    universalRouter: live('0x23617e59A5925b2A4Bf75d73ff6711cD0b29De85', '2.1.2'),
     permit2: live(PERMIT2),
     stateView: live('0x7ffe42c4a5deea5b0fec41c94c136cf115597227'),
     nftxFlexHook: live('0xC26A5Cb51b1818F62a4C6693a9a1feDB3340efc4'),
@@ -122,7 +123,7 @@ export const ADDRESS_TABLES: Readonly<Record<ChainId, ChainContracts>> = freezeT
     poolManager: live('0x498581ff718922c3f8e6a244956af099b2652b2b'),
     positionManager: live('0x7C5f5A4bBd8fD63184577525326123B519429bDc'),
     quoter: live('0x0d5e0F971ED27FBfF6c2837bf31316121532048D'),
-    universalRouter: live('0x6ff5693b99212da76ad316178a184ab56d299b43'),
+    universalRouter: live('0xd6145b2D3F379919E8CdEda7B97e37c4b2Ca9c40', '2.1.2'),
     stateView: live('0xa3c0c9b65bad0b08107aa264b0f3db444b867a71'),
     permit2: live(PERMIT2),
     launchGate: live('0xdb25a2324d2243b9624b620a33c80eff12ec7a89'),
@@ -134,7 +135,7 @@ export const ADDRESS_TABLES: Readonly<Record<ChainId, ChainContracts>> = freezeT
     poolManager: live('0x8366a39cc670b4001a1121b8f6a443a643e40951'),
     positionManager: live('0x6049c9a0e26405c0985f9e3685c87d0ae917f82b'),
     quoter: live('0x8dc178efb8111bb0973dd9d722ebeff267c98f94'),
-    universalRouter: live('0x4fca4a51ab4f23a7447b3284fbd7d73289a89fb1'),
+    universalRouter: live('0x8702463e73f74d0b6765aBceb314Ef07aCb92650', '2.1.2'),
     stateView: live('0xf3334192d15450cdd385c8b70e03f9a6bd9e673b'),
     permit2: live(PERMIT2),
     launchGate: live('0x8b97df0d72482f073d9efb3ad5b534fcd55d735b'),
@@ -146,7 +147,7 @@ export const ADDRESS_TABLES: Readonly<Record<ChainId, ChainContracts>> = freezeT
     poolManager: live('0x8366a39CC670B4001A1121B8F6A443A643e40951'),
     positionManager: live('0x58daec3116aae6D93017bAAea7749052E8a04fA7'),
     quoter: live('0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94'),
-    universalRouter: live('0x8876789976dEcBfCbBbe364623C63652db8C0904'),
+    universalRouter: live('0x204FAca1764B154221e35c0d20aBb3c525710498', '2.1.2'),
     stateView: live('0xf3334192d15450cdd385c8b70e03f9a6bd9e673b'),
     permit2: live(PERMIT2),
     launchGate: live('0xd8f7c0bd089a8f42728a7cfc95b18b3636f37d75'),
@@ -158,7 +159,7 @@ export const ADDRESS_TABLES: Readonly<Record<ChainId, ChainContracts>> = freezeT
     poolManager: live('0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32'),
     positionManager: live('0xd88F38F930b7952f2DB2432Cb002E7abbF3dD869'),
     quoter: live('0x3972C00f7ed4885e145823eb7C655375d275A1C5'),
-    universalRouter: live('0xa51afafe0263b40edaef0df8781ea9aa03e381a3'),
+    universalRouter: live('0x2d01411773c8C24805306E89A41F7855C3c4Fe65', '2.1.2'),
     stateView: live('0x76fd297e2d437cd7f76d50f01afe6160f86e9990'),
     permit2: live(PERMIT2),
     launchGate: live('0x8b97df0d72482f073d9efb3ad5b534fcd55d735b'),
@@ -170,7 +171,7 @@ export const ADDRESS_TABLES: Readonly<Record<ChainId, ChainContracts>> = freezeT
     poolManager: live('0x8366a39CC670B4001A1121B8F6A443A643e40951'),
     positionManager: live('0x58daec3116aae6D93017bAAea7749052E8a04fA7'),
     quoter: live('0x8Dc178eFB8111BB0973Dd9d722ebeFF267c98F94'),
-    universalRouter: live('0x8876789976dEcBfCbBbe364623C63652db8C0904'),
+    universalRouter: live('0x8876789976dEcBfCbBbe364623C63652db8C0904', '2.1.1'),
     permit2: live(PERMIT2),
     launchGate: live('0xdb25a2324d2243b9624b620a33c80eff12ec7a89'),
   },
@@ -181,7 +182,7 @@ export const ADDRESS_TABLES: Readonly<Record<ChainId, ChainContracts>> = freezeT
     poolManager: live('0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32'),
     positionManager: live('0x1b35d13a2E2528f192637F14B05f0Dc0e7dEB566'),
     quoter: live('0x3972C00f7ed4885e145823eb7C655375d275A1C5'),
-    universalRouter: live('0x112908dac86e20e7241b0927479ea3bf935d1fa0'),
+    universalRouter: live('0x661E93cca42AfacB172121EF892830cA3b70F08d', '2.1.2'),
     stateView: live('0x76fd297e2d437cd7f76d50f01afe6160f86e9990'),
     permit2: live(PERMIT2),
     launchGate: live('0x8b97df0d72482f073d9efb3ad5b534fcd55d735b'),
@@ -199,7 +200,7 @@ export const ADDRESS_TABLES: Readonly<Record<ChainId, ChainContracts>> = freezeT
     poolManager: live('0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408'),
     positionManager: live('0x4B2C77d209D3405F41a037Ec6c77F7F5b8e2ca80'),
     quoter: live('0x4A6513c898fe1B2d0E78d3b0e0A4a151589B1cBa'),
-    universalRouter: live('0x492e6456d9528771018deb9e87ef7750ef184104'),
+    universalRouter: live('0x8702463e73f74d0b6765aBceb314Ef07aCb92650', '2.1.2'),
     permit2: live(PERMIT2),
     launchGate: live('0xfa57662c286385c4946751ac0be8a5bd6f55852b'),
   },
@@ -210,7 +211,7 @@ export const ADDRESS_TABLES: Readonly<Record<ChainId, ChainContracts>> = freezeT
     poolManager: live('0xE03A1074c86CFeDd5C142C4F04F1a1536e203543'),
     positionManager: live('0x429ba70129df741B2Ca2a85BC3A2a3328e5c09b4'),
     quoter: live('0x61b3f2011a92d183c7dbadbda940a7555ccf9227'),
-    universalRouter: live('0x3a9d48ab9751398bbfa63ad67599bb04e4bdf98b'),
+    universalRouter: live('0x7E4f6c5e954Da5c61B3423D81E2277431Ac043f3', '2.1.2'),
     stateView: live('0xe1dd9c3fa50edb962e442f60dfbc432e24537e4c'),
     permit2: live(PERMIT2),
     launchGate: live('0xe49443ae5ea31fb17b96f2fc7a63b672ab7517e0'),

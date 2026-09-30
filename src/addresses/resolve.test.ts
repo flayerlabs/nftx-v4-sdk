@@ -59,7 +59,7 @@ describe('addresses: resolution guards', () => {
     )
     expect(getAddressFor(1, 'poolManager')).toBe('0x000000000004444c5dc75cB358380D2e3dE08A90')
     expect(getAddressFor(1, 'positionManager')).toBe('0xbD216513d74C8cf14cf4747E6AaA6420FF64ee9e')
-    expect(getAddressFor(1, 'universalRouter')).toBe('0x66a9893cc07d91d95644aedd05d03f95e1dba8af')
+    expect(getAddressFor(1, 'universalRouter')).toBe('0x23617e59A5925b2A4Bf75d73ff6711cD0b29De85')
     expect(hasContract(1, 'quoter')).toBe(true)
   })
 

@@ -28,7 +28,10 @@ export function routedSwapQuoteRequest(intent: RoutedSwapIntent): RoutedSwapQuot
     !Number.isInteger(intent.slippageBps) ||
     intent.slippageBps < 0 ||
     intent.slippageBps >= 10_000 ||
-    intent.amountIn > MAX_UINT256
+    intent.amountIn > MAX_UINT256 ||
+    (intent.permitAmount !== undefined &&
+      intent.permitAmount !== 'EXACT' &&
+      intent.permitAmount !== 'FULL')
   )
     throw new InvalidInputError('Invalid routed swap parameters.')
   const tokenIn = parseAddressAllowZero(intent.tokenIn)
@@ -43,7 +46,7 @@ export function routedSwapQuoteRequest(intent: RoutedSwapIntent): RoutedSwapQuot
     recipient: parseAddress(intent.account),
     slippageBps: intent.slippageBps,
     generatePermitAsTransaction: false,
-    permitAmount: 'EXACT',
+    permitAmount: intent.permitAmount ?? 'EXACT',
   }
 }
 
@@ -95,8 +98,8 @@ function assertQuote(
 
 /**
  * Returns existing write PlanSteps and optional typed data to sign separately.
- * Execute approvals and wait for successful receipts before resolving calldata.
- * Backend unlimited ERC20 approvals are deliberately reduced to the exact input.
+ * Sign first, then execute approvals sequentially or batch them with the swap.
+ * EXACT caps ERC20 approvals to the input; FULL preserves the provider's amount.
  */
 export function prepareRoutedSwap(
   intent: RoutedSwapIntent,
@@ -143,7 +146,10 @@ export function prepareRoutedSwap(
       address: parseAddress(intent.tokenIn),
       abi: erc20Abi,
       functionName: 'approve',
-      args: [permit2, id === 'cancel' ? 0n : intent.amountIn],
+      args: [
+        permit2,
+        id === 'cancel' || intent.permitAmount === 'FULL' ? decoded.args[1] : intent.amountIn,
+      ],
       requiredAccount: intent.account,
       approvalTarget: permit2,
       replaySafe: true,
@@ -164,6 +170,12 @@ export interface ResolveRoutedSwapInput {
   contracts: RoutedSwapContracts
   provider: TrustedRoutedSwapProvider
   signature?: Hex
+  /**
+   * Set only when resolving before approvals execute in the same atomic batch.
+   * Skips the provider's current-state simulation, which cannot see those approvals.
+   * Omit after sequential approval receipts, or when no approval is required.
+   */
+  approvalsPending?: boolean
   now?: () => number
 }
 
@@ -232,7 +244,7 @@ export async function resolveRoutedSwap(input: ResolveRoutedSwapInput): Promise<
         expiresAt,
       },
       refreshGasPrice: true,
-      simulateTransaction: true,
+      simulateTransaction: !input.approvalsPending,
     },
     intent.chainId,
     floor,

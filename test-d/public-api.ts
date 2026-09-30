@@ -7,6 +7,12 @@ import {
   type ListingTaxInput,
   type PlanState,
   type PlanStep,
+  prepareRoutedSwap,
+  resolveRoutedSwap,
+  routedSwapQuoteRequest,
+  type RoutedSwapCalldataRequest,
+  type RoutedSwapIntent,
+  type TrustedRoutedSwapProvider,
   tokenBuyCostQuoteParams,
   withdrawEscrow,
 } from '@flayerlabs/nftx-v4-sdk'
@@ -17,6 +23,7 @@ import type { Address } from 'viem'
 
 declare const address: Address
 declare const call: EncodedCall
+declare const provider: TrustedRoutedSwapProvider
 
 const context = { chainId: 1 }
 const listing: ListingTaxInput = {
@@ -66,11 +73,40 @@ const plans: PlanStep[][] = [
 const callsId: PlanState['callsId'] = '0xcalls'
 const value: bigint = encodedCallValueToBigInt(call)
 
+async function routedSwapTypes() {
+  const intent: RoutedSwapIntent = {
+    chainId: 1,
+    account: address,
+    tokenIn: address,
+    tokenOut: address,
+    amountIn: 1n,
+    slippageBps: 100,
+    permitAmount: 'FULL',
+  }
+  const contracts = {
+    permit2: getAddressFor(1, 'permit2'),
+    universalRouter: getAddressFor(1, 'universalRouter'),
+  }
+  const request = routedSwapQuoteRequest(intent)
+  const quote = await provider.requestQuote(request, intent.chainId)
+  const prepared = prepareRoutedSwap(intent, quote, null, contracts)
+  const simulateTransaction: RoutedSwapCalldataRequest['simulateTransaction'] = false
+  const step: PlanStep = await resolveRoutedSwap({
+    intent,
+    quote,
+    contracts,
+    provider,
+    approvalsPending: prepared.approvalSteps.length > 0,
+  })
+  return { step, simulateTransaction }
+}
+
 void [
   callsId,
   getAddressFor(1, 'nftxZap'),
   plans,
   quote,
+  routedSwapTypes,
   tokenBuyCostQuoteParams,
   tokenEscrowAbi,
   value,
