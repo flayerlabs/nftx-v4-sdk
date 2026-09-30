@@ -33,6 +33,15 @@ export function minOutWithSlippage(amountOut: bigint, slippageBps: number): bigi
   return (amountOut * (BPS_DENOMINATOR - BigInt(slippageBps))) / BPS_DENOMINATOR
 }
 
+/** Expected output whose slippage floor covers an explicitly requested minimum. */
+export function grossUpForSlippage(minOut: bigint, slippageBps: number): bigint {
+  assertBps(slippageBps)
+  if (minOut < 0n) throw new InvalidInputError('Minimum output cannot be negative.')
+  if (slippageBps === 10_000) throw new InvalidInputError('Cannot gross up at 100% slippage.')
+  const kept = BPS_DENOMINATOR - BigInt(slippageBps)
+  return (minOut * BPS_DENOMINATOR + kept - 1n) / kept
+}
+
 /**
  * Cap `amount` by the slippage tolerance — a max the wallet won't exceed
  * (rounded UP via ceil-division).

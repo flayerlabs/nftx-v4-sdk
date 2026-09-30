@@ -103,6 +103,17 @@ export function tokenSwapQuoteParams(
   }
 }
 
+/** Exact-output quote; direction is unchanged, the pinned amount is output units. */
+export function tokenSwapExactOutQuoteParams(
+  side: TokenSwapSide,
+  poolKey: V4PoolKey,
+  vToken: Address,
+  pairToken: Address,
+  exactAmount: bigint,
+): QuoteExactSingleParams {
+  return tokenSwapQuoteParams(side, poolKey, vToken, pairToken, exactAmount)
+}
+
 /**
  * How far an execution quote falls below a reference value, in basis points.
  * Quotes at or above the reference have zero adverse impact.

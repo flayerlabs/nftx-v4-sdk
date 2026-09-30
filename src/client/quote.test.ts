@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { BaseError, ContractFunctionRevertedError, type Address, type PublicClient } from 'viem'
 
 import { BUY_QUOTE_BUFFER_BPS } from '../constants/pool'
@@ -45,6 +45,72 @@ function listingQuoteClient(tax: bigint, amountOut: bigint): PublicClient {
 }
 
 describe('ReadNftxSdk: quoting', () => {
+  it('quotes exact output in both directions without changing swap direction', async () => {
+    const simulateContract = vi.fn(async () => ({ result: [123n, 0n] as const }))
+    const sdk = new ReadNftxSdk({
+      chainId: CHAIN,
+      publicClient: { simulateContract } as unknown as PublicClient,
+    })
+    expect(await sdk.quoteTokenSwapExactOut('buy', COLLECTION, 999n, { vault })).toBe(123n)
+    expect(simulateContract).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        functionName: 'quoteExactOutputSingle',
+        args: [expect.objectContaining({ exactAmount: 999n, zeroForOne: true })],
+      }),
+    )
+    expect(await sdk.quoteTokenSwapExactOut('sell', COLLECTION, 888n, { vault })).toBe(123n)
+    expect(simulateContract).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        args: [expect.objectContaining({ exactAmount: 888n, zeroForOne: false })],
+      }),
+    )
+  })
+
+  it('converts Arc quote amounts between pool units and native wei', async () => {
+    const pair = '0x3600000000000000000000000000000000000000'
+    const arcVault = Vault.create({
+      chainId: 5042,
+      collection: COLLECTION,
+      collectionToken: VTOKEN,
+      poolKey: nftxV4PoolKey(VTOKEN, pair, HOOK),
+    })
+    const simulateContract = vi.fn(async () => ({ result: [2n, 0n] as const }))
+    const sdk = new ReadNftxSdk({
+      chainId: 5042,
+      publicClient: { simulateContract } as unknown as PublicClient,
+    })
+    expect(await sdk.quoteTokenSwap('buy', COLLECTION, 3n * 10n ** 12n, { vault: arcVault })).toBe(
+      2n,
+    )
+    expect(simulateContract).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        args: [expect.objectContaining({ exactAmount: 3n })],
+      }),
+    )
+    expect(await sdk.quoteTokenSwapExactOut('buy', COLLECTION, 999n, { vault: arcVault })).toBe(
+      2n * 10n ** 12n,
+    )
+    expect(simulateContract).toHaveBeenLastCalledWith(
+      expect.objectContaining({ args: [expect.objectContaining({ exactAmount: 999n })] }),
+    )
+    expect(await sdk.quoteTokenSwap('sell', COLLECTION, 3n, { vault: arcVault })).toBe(
+      2n * 10n ** 12n,
+    )
+    expect(await sdk.quoteFloorBuy(COLLECTION, 1n, { vault: arcVault })).toBe(2n * 10n ** 12n)
+    expect(await sdk.quoteSellNfts(COLLECTION, 1n, { vault: arcVault })).toBe(2n * 10n ** 12n)
+    expect(await sdk.quoteTokenBuyCost(COLLECTION, 3n, { vault: arcVault })).toBe(2n * 10n ** 12n)
+    expect(
+      await sdk.quoteTokenSwapExactOut('sell', COLLECTION, 10n ** 12n + 1n, { vault: arcVault }),
+    ).toBe(2n)
+    expect(simulateContract).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        args: [expect.objectContaining({ exactAmount: 2n })],
+      }),
+    )
+    await expect(
+      sdk.quoteTokenSwap('buy', COLLECTION, 1n, { vault: arcVault }),
+    ).rejects.toBeInstanceOf(InvalidInputError)
+  })
   it('quotes a floor buy (exact-output amountIn) and caps with the buffer', async () => {
     const sdk = new ReadNftxSdk({ chainId: CHAIN, publicClient: quoteClient(1000n) })
     expect(await sdk.quoteFloorBuy(COLLECTION, 2, { vault })).toBe(1000n)

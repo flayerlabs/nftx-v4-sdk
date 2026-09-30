@@ -4,12 +4,24 @@ import { InvalidInputError } from '../errors'
 import {
   assertSafeSlippageForFloor,
   bpsToPercent,
+  grossUpForSlippage,
   maxSpendWithSlippage,
   minOutWithSlippage,
   percentToBps,
 } from './slippage'
 
 describe('math/slippage', () => {
+  it('grosses up to the smallest quote that covers the typed minimum', () => {
+    for (const minimum of [0n, 1n, 7n, 1001n]) {
+      for (const bps of [0, 1, 50, 9999]) {
+        const gross = grossUpForSlippage(minimum, bps)
+        expect(minOutWithSlippage(gross, bps)).toBeGreaterThanOrEqual(minimum)
+        if (gross > 0n) expect(minOutWithSlippage(gross - 1n, bps)).toBeLessThan(minimum)
+      }
+    }
+    expect(() => grossUpForSlippage(1n, 10000)).toThrow(InvalidInputError)
+    expect(() => grossUpForSlippage(-1n, 50)).toThrow(InvalidInputError)
+  })
   it('floors minOut and ceils maxSpend (the rounding contract)', () => {
     // 1000 wei, 50 bps (0.5%)
     expect(minOutWithSlippage(1000n, 50)).toBe(995n)

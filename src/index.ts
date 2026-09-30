@@ -56,6 +56,7 @@ export {
   assertSafeSlippageForFloor,
   bpsToPercent,
   maxSpendWithSlippage,
+  grossUpForSlippage,
   minOutWithSlippage,
   percentToBps,
 } from './math/slippage'
@@ -90,6 +91,7 @@ export {
   tokenBuyCostQuoteParams,
   tokenSwapInputCurrency,
   tokenSwapQuoteParams,
+  tokenSwapExactOutQuoteParams,
 } from './pool/quoteParams'
 
 // Plan types (the in-process executor/UI artifact).
@@ -182,3 +184,43 @@ export {
   type WriteResult,
 } from './client/readWrite'
 export { type CallGuardConfig, createCallGuard } from './client/guards'
+
+// NFT authorization across ERC721 and legacy collections.
+export {
+  nftStandard,
+  authoriseNftsSteps,
+  readPunkOffers,
+  readKittyApprovals,
+  punkListingsAtRisk,
+  type NftStandard,
+  type NftApproval,
+  type TokenAuthorisation,
+  type PunkOfferVerdict,
+} from './encoders/nftApproval'
+
+// Routed token swaps through an explicitly trusted quote/calldata provider.
+export {
+  routedSwapQuoteRequest,
+  prepareRoutedSwap,
+  resolveRoutedSwap,
+  type ResolveRoutedSwapInput,
+} from './swap/routedSwap'
+export type {
+  RoutedSwapIntent,
+  RoutedSwapQuote,
+  RoutedSwapApproval,
+  RoutedSwapContracts,
+  RoutedSwapTransaction,
+  RoutedSwapQuoteRequest,
+  RoutedSwapCalldataRequest,
+  TrustedRoutedSwapProvider,
+} from './swap/types'
+export type { RoutedSwapPermitTypedData } from './swap/permit'
+
+export {
+  nativeCurrency,
+  nativeWeiToPoolUnits,
+  poolUnitsToNativeWei,
+  ARC_CHAIN_ID,
+  type NativeCurrency,
+} from './math/currency'

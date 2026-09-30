@@ -36,14 +36,14 @@ describe('client/ReadNftxSdk', () => {
   it('reads the collection token and initialization state', async () => {
     const sdk = new ReadNftxSdk({
       chainId: CHAIN,
-      publicClient: makeClient({ collectionToken: VTOKEN }),
+      publicClient: makeClient({ collectionToken: VTOKEN, collectionInitialized: true }),
     })
     expect(await sdk.collectionToken(COLLECTION)).toBe(VTOKEN)
     expect(await sdk.collectionInitialized(COLLECTION)).toBe(true)
 
     const empty = new ReadNftxSdk({
       chainId: CHAIN,
-      publicClient: makeClient({ collectionToken: zeroAddress }),
+      publicClient: makeClient({ collectionToken: zeroAddress, collectionInitialized: false }),
     })
     expect(await empty.collectionInitialized(COLLECTION)).toBe(false)
   })
@@ -53,6 +53,7 @@ describe('client/ReadNftxSdk', () => {
       chainId: CHAIN,
       publicClient: makeClient({
         collectionToken: VTOKEN,
+        collectionInitialized: true,
         getCollectionPoolKey: encodePoolKey(canonicalKey),
       }),
     })
@@ -68,6 +69,7 @@ describe('client/ReadNftxSdk', () => {
       chainId: CHAIN,
       publicClient: makeClient({
         collectionToken: VTOKEN,
+        collectionInitialized: true,
         getCollectionPoolKey: encodePoolKey({ ...canonicalKey, tickSpacing: 30 }),
       }),
     })
@@ -78,7 +80,7 @@ describe('client/ReadNftxSdk', () => {
     const sdk = new ReadNftxSdk({
       chainId: CHAIN,
       // getCollectionPoolKey handler intentionally absent — must not be called.
-      publicClient: makeClient({ collectionToken: VTOKEN }),
+      publicClient: makeClient({ collectionToken: VTOKEN, collectionInitialized: true }),
     })
     const vault = await sdk.resolveVault(COLLECTION, { verifyPoolKey: false })
     expect(vault.collectionToken).toBe(VTOKEN)
@@ -87,8 +89,18 @@ describe('client/ReadNftxSdk', () => {
   it('rejects an uninitialized collection', async () => {
     const sdk = new ReadNftxSdk({
       chainId: CHAIN,
-      publicClient: makeClient({ collectionToken: zeroAddress }),
+      publicClient: makeClient({ collectionToken: zeroAddress, collectionInitialized: false }),
     })
+    await expect(sdk.resolveVault(COLLECTION)).rejects.toBeInstanceOf(InvalidInputError)
+  })
+
+  it('rejects a registered collection whose pool is not initialized', async () => {
+    const sdk = new ReadNftxSdk({
+      chainId: CHAIN,
+      publicClient: makeClient({ collectionToken: VTOKEN, collectionInitialized: false }),
+    })
+    expect(await sdk.collectionToken(COLLECTION)).toBe(VTOKEN)
+    expect(await sdk.collectionInitialized(COLLECTION)).toBe(false)
     await expect(sdk.resolveVault(COLLECTION)).rejects.toBeInstanceOf(InvalidInputError)
   })
 

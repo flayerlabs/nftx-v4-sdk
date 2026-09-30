@@ -8,7 +8,14 @@ import {
   type WalletClient,
 } from 'viem'
 
-import { AccountMismatchError, ChainMismatchError, TxRevertedError } from '../errors'
+import {
+  AccountMismatchError,
+  ChainMismatchError,
+  TxRevertedError,
+  InvalidInputError,
+  OperatorNotContractError,
+} from '../errors'
+import { getAddressFor } from '../addresses/resolve'
 import type { PlanStep } from '../plan/types'
 import { createCallGuard } from './guards'
 
@@ -42,6 +49,18 @@ function guardWithSimulation(simulateContract: () => Promise<unknown>) {
 }
 
 describe('client/guards', () => {
+  it('checks Punk offer operators before simulation, including code and metadata', async () => {
+    const simulateContract = vi.fn(async () => ({}))
+    const guard = guardWithSimulation(simulateContract)
+    const offer = { ...step, functionName: 'offerPunkForSaleToAddress' }
+    await expect(guard(offer)).rejects.toBeInstanceOf(InvalidInputError)
+    await expect(guard({ ...offer, approvalTarget: ADDRESS })).rejects.toBeInstanceOf(
+      OperatorNotContractError,
+    )
+    expect(simulateContract).not.toHaveBeenCalled()
+    await guard({ ...offer, approvalTarget: getAddressFor(CHAIN, 'nftxZap') })
+    expect(simulateContract).toHaveBeenCalledOnce()
+  })
   it('refuses to inspect or simulate calls with a mismatched public client chain', async () => {
     const getCode = vi.fn(async () => '0x6000')
     const simulateContract = vi.fn()

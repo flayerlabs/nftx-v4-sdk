@@ -2,6 +2,7 @@ import { type Address, getAddress, type Hex, type WalletClient } from 'viem'
 
 import { type ContractOverrides, getAddressFor } from '../addresses/resolve'
 import { InvalidInputError, WalletError } from '../errors'
+import { punkListingsAtRisk } from '../encoders/nftApproval'
 import {
   buyNft,
   buyTokens as encodeBuyTokens,
@@ -69,6 +70,8 @@ export interface SellNftsInput {
   minOut?: BigIntish
   slippageBps?: number
   allowUnsafe?: boolean
+  /** Explicit consent to replacing existing paid CryptoPunks sale offers. */
+  allowPunkOfferOverwrite?: boolean
 }
 
 export interface BuyTokensInput {
@@ -203,12 +206,22 @@ export class ReadWriteNftxSdk extends ReadNftxSdk {
       const amountOut = await this.quoteSellNfts(collection, input.tokenIds.length)
       this.assertMinOutWithinSafeBound(amountOut, minOut, input.allowUnsafe ?? false)
     }
-    const isApprovedForAll = await this.isApprovedForAll(collection, this.account, zap)
+    const approval = await this.nftApproval(collection, this.account, zap, input.tokenIds)
+    const unreadablePunkOffers =
+      approval.kind === 'punks' && approval.verdicts.some((v) => v.readFailed)
+    if (
+      (punkListingsAtRisk(approval).length > 0 || unreadablePunkOffers) &&
+      !input.allowPunkOfferOverwrite
+    ) {
+      throw new InvalidInputError(
+        'Authorizing these CryptoPunks would overwrite paid sale offers; pass allowPunkOfferOverwrite after confirming with the owner.',
+      )
+    }
     const steps = sellNft(this.encoderCtx(), {
       collection,
       tokenIds: input.tokenIds,
       minOut,
-      isApprovedForAll,
+      approval,
     })
     return this.executeOrEncode(steps, opts)
   }

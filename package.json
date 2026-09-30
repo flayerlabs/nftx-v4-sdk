@@ -1,6 +1,6 @@
 {
   "name": "@flayerlabs/nftx-v4-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Strict TypeScript SDK for NFTX v4 on Ethereum and Base: canonical deployments, quotes, transaction plans, guarded calldata, and viem-backed execution.",
   "packageManager": "pnpm@10.34.3",
   "type": "module",

@@ -14,3 +14,7 @@ export { flEthAbi } from './flEth'
 export { erc721Abi } from './erc721'
 export { nftxV4HookAbi } from './nftxV4Hook'
 export { tokenEscrowAbi } from './tokenEscrow'
+
+export { cryptoPunksAbi } from './cryptoPunks'
+export { cryptoKittiesAbi } from './cryptoKitties'
+export { universalRouterAbi } from './universalRouter'

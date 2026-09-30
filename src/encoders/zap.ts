@@ -12,7 +12,8 @@ import {
 } from '../lib/validate'
 import type { BigIntish } from '../math/amount'
 import type { PlanStep } from '../plan/types'
-import { approveErc20, approveErc721ForAll } from './approvals'
+import { approveErc20 } from './approvals'
+import { authoriseNftsSteps, type NftApproval } from './nftApproval'
 
 /**
  * Pure NFTXZap trade encoders → `PlanStep[]` (calldata is projected later via
@@ -104,18 +105,28 @@ export interface SellNftParams {
   tokenIds: readonly BigIntish[]
   /** Min ETH out after slippage (the facade ensures this is non-zero). */
   minOut: BigIntish
-  /** Fresh `isApprovedForAll(owner, zap)` — skips the approval step when true. */
-  isApprovedForAll: boolean
+  /** Fresh ERC721 blanket state; legacy collections use per-token approvals. */
+  isApprovedForAll?: boolean
+  /** Fresh state matching the collection’s ERC721, punk or kitty approval model. */
+  approval?: NftApproval
 }
 
-/** Sell NFTs to the pool: `[approve721?]` + `sellNFTForETH`. */
+/** Sell NFTs to the pool with the collection's required approval steps. */
 export function sellNft(ctx: TradeEncoderContext, params: SellNftParams): PlanStep[] {
   const zap = zapAddress(ctx)
   const collection = parseAddress(params.collection, 'collection')
   const ids = parseTokenIds(params.tokenIds)
   const minOut = parsePositiveAmount(params.minOut, 'minOut')
   return [
-    approveErc721ForAll({ collection, operator: zap, skip: params.isApprovedForAll }),
+    ...authoriseNftsSteps({
+      collection,
+      operator: zap,
+      tokenIds: ids,
+      ...(params.approval ? { approval: params.approval } : {}),
+      ...(params.isApprovedForAll !== undefined
+        ? { isApprovedForAll: params.isApprovedForAll }
+        : {}),
+    }),
     {
       id: 'sell',
       label: `Sell ${ids.length} NFT${plural(ids.length)}`,

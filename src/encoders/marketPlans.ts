@@ -15,7 +15,8 @@ import {
 import type { BigIntish } from '../math/amount'
 import { maxSpendWithSlippage, minOutWithSlippage } from '../math/slippage'
 import type { PlanStep } from '../plan/types'
-import { approveErc20, approveErc721ForAll } from './approvals'
+import { approveErc20 } from './approvals'
+import { authoriseNftsSteps, type NftApproval } from './nftApproval'
 import {
   buyNft,
   buyTokens,
@@ -126,7 +127,8 @@ export interface SellToPoolPlanInput {
   tokenIds: readonly BigIntish[]
   quotedProceedsWei: BigIntish
   slippageBps: number
-  isApprovedForAll: boolean
+  isApprovedForAll?: boolean
+  approval?: NftApproval
 }
 
 /** Build an NFT approval plus an exact-input zap sale with a quoted ETH floor. */
@@ -142,7 +144,8 @@ export function buildSellToPoolPlan(
     collection: parseAddress(input.collection, 'collection'),
     tokenIds: input.tokenIds,
     minOut,
-    isApprovedForAll: input.isApprovedForAll,
+    ...(input.approval ? { approval: input.approval } : {}),
+    ...(input.isApprovedForAll !== undefined ? { isApprovedForAll: input.isApprovedForAll } : {}),
   })
 }
 
@@ -150,7 +153,8 @@ export interface DepositForTokenPlanInput {
   collection: Address
   tokenIds: readonly BigIntish[]
   recipient: Address
-  isApprovedForAll: boolean
+  isApprovedForAll?: boolean
+  approval?: NftApproval
 }
 
 interface DepositNftsStepsInput {
@@ -158,15 +162,18 @@ interface DepositNftsStepsInput {
   collection: Address
   tokenIds: bigint[]
   recipient: Address
-  isApprovedForAll: boolean
+  isApprovedForAll?: boolean
+  approval?: NftApproval
 }
 
 function depositNftsSteps(input: DepositNftsStepsInput): PlanStep[] {
   return [
-    approveErc721ForAll({
+    ...authoriseNftsSteps({
       collection: input.collection,
       operator: input.locker,
-      skip: input.isApprovedForAll,
+      tokenIds: input.tokenIds,
+      ...(input.approval ? { approval: input.approval } : {}),
+      ...(input.isApprovedForAll !== undefined ? { isApprovedForAll: input.isApprovedForAll } : {}),
     }),
     {
       id: 'deposit',
@@ -193,7 +200,8 @@ export function buildDepositForTokenPlan(
     collection,
     tokenIds,
     recipient,
-    isApprovedForAll: input.isApprovedForAll,
+    ...(input.approval ? { approval: input.approval } : {}),
+    ...(input.isApprovedForAll !== undefined ? { isApprovedForAll: input.isApprovedForAll } : {}),
   })
 }
 
@@ -210,7 +218,8 @@ export interface SwapNftsPlanInput {
   /** Required whenever a fill or redeem pulls collection tokens. */
   collectionToken?: Address
   recipient: Address
-  isApprovedForAll: boolean
+  isApprovedForAll?: boolean
+  approval?: NftApproval
 }
 
 interface SwapNftsPlanOptions {
@@ -246,10 +255,12 @@ function buildSwapNftsSteps(
     throw new InvalidInputError('Nothing selected to swap.')
   }
   const approveNfts = () =>
-    approveErc721ForAll({
+    authoriseNftsSteps({
       collection,
       operator: locker,
-      skip: input.isApprovedForAll,
+      tokenIds: depositIds,
+      ...(input.approval ? { approval: input.approval } : {}),
+      ...(input.isApprovedForAll !== undefined ? { isApprovedForAll: input.isApprovedForAll } : {}),
     })
 
   if (
@@ -260,7 +271,7 @@ function buildSwapNftsSteps(
   ) {
     return requireAccount(
       [
-        approveNfts(),
+        ...approveNfts(),
         ...(options.fundingStep ? [options.fundingStep] : []),
         {
           id: 'swap',
@@ -283,7 +294,10 @@ function buildSwapNftsSteps(
         collection,
         tokenIds: depositIds,
         recipient: account,
-        isApprovedForAll: input.isApprovedForAll,
+        ...(input.approval ? { approval: input.approval } : {}),
+        ...(input.isApprovedForAll !== undefined
+          ? { isApprovedForAll: input.isApprovedForAll }
+          : {}),
       }),
     )
   }
@@ -348,10 +362,7 @@ function buildSwapNftsSteps(
 }
 
 /** Build direct Locker/Listings settlement using NFTs and/or collection tokens. */
-export function buildSwapNftsPlan(
-  ctx: TradeEncoderContext,
-  input: SwapNftsPlanInput,
-): PlanStep[] {
+export function buildSwapNftsPlan(ctx: TradeEncoderContext, input: SwapNftsPlanInput): PlanStep[] {
   return buildSwapNftsSteps(ctx, input)
 }
 
@@ -363,10 +374,7 @@ export interface MixedBuyPlanInput extends SwapNftsPlanInput {
 }
 
 /** Add a zap token-buy funding leg before a direct Locker/Listings settlement. */
-export function buildMixedBuyPlan(
-  ctx: TradeEncoderContext,
-  input: MixedBuyPlanInput,
-): PlanStep[] {
+export function buildMixedBuyPlan(ctx: TradeEncoderContext, input: MixedBuyPlanInput): PlanStep[] {
   const { shortfallWei } = tokenRequirement({
     floorCount: input.tokenIds.length,
     ...(input.listedItems ? { listedItems: input.listedItems } : {}),
@@ -408,7 +416,8 @@ export interface ListAboveFloorPlanInput {
   items: readonly ListingPlanItem[]
   duration: number
   created: number
-  isApprovedForAll: boolean
+  isApprovedForAll?: boolean
+  approval?: NftApproval
   ethPayout?: ListingEthPayout
 }
 
@@ -439,10 +448,12 @@ export function buildListAboveFloorPlan(
     }),
   }))
   const steps: PlanStep[] = [
-    approveErc721ForAll({
+    ...authoriseNftsSteps({
       collection,
       operator: listings,
-      skip: input.isApprovedForAll,
+      tokenIds,
+      ...(input.approval ? { approval: input.approval } : {}),
+      ...(input.isApprovedForAll !== undefined ? { isApprovedForAll: input.isApprovedForAll } : {}),
     }),
     {
       id: 'list',

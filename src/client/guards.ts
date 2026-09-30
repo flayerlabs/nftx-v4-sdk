@@ -44,7 +44,7 @@ export interface CallGuardConfig {
   simulate: boolean
 }
 
-const APPROVAL_FNS = new Set(['setApprovalForAll', 'approve'])
+const APPROVAL_FNS = new Set(['setApprovalForAll', 'approve', 'offerPunkForSaleToAddress'])
 
 export function createCallGuard(cfg: CallGuardConfig): (step: PlanStep) => Promise<void> {
   const liveAddresses = new Set(

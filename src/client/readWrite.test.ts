@@ -41,6 +41,7 @@ function fakes(opts: FakeOpts = {}) {
     readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
       const defaults: Record<string, unknown> = {
         collectionToken: VTOKEN,
+        collectionInitialized: true,
         getCollectionPoolKey: encodeAbiParameters([poolKeyAbiParameter], [vault.poolKey]),
         isApprovedForAll: false,
         allowance: 0n,
@@ -94,6 +95,59 @@ describe('createNftxSdk', () => {
 })
 
 describe('ReadWriteNftxSdk: trade writes', () => {
+  it('requires owner consent before overwriting paid or unreadable Punk offers', async () => {
+    for (const readFailed of [false, true]) {
+      const f = fakes()
+      const sdk = createNftxSdk({ publicClient: f.publicClient, walletClient: f.walletClient })
+      vi.spyOn(sdk, 'nftApproval').mockResolvedValue({
+        kind: 'punks',
+        verdicts: [
+          {
+            tokenId: 1n,
+            authorised: false,
+            readFailed,
+            standingSalePriceWei: readFailed ? 0n : 10n,
+          },
+        ],
+      })
+      const input = {
+        collection: '0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB' as const,
+        tokenIds: [1n],
+        minOut: 1000n,
+      }
+      await expect(sdk.sellNfts(input)).rejects.toBeInstanceOf(InvalidInputError)
+      expect(f.writeContract).not.toHaveBeenCalled()
+      expect(f.sendCalls).not.toHaveBeenCalled()
+      const result = await sdk.sellNfts({ ...input, allowPunkOfferOverwrite: true })
+      expect(result.mode === 'submit' && result.state.status).toBe('success')
+      expect(f.writeContract).toHaveBeenCalledWith(
+        expect.objectContaining({
+          functionName: 'offerPunkForSaleToAddress',
+          args: [1n, 0n, expect.any(String)],
+        }),
+      )
+    }
+  })
+
+  it('never writes a Punk offer when its configured operator has no code', async () => {
+    const f = fakes({ reads: { punksOfferedForSale: [false, 1n, ACCOUNT, 0n, ACCOUNT] } })
+    const operator = '0x0000000000000000000000000000000000001234'
+    vi.mocked(f.publicClient.getCode).mockImplementation(async ({ address }) =>
+      address.toLowerCase() === operator.toLowerCase() ? '0x' : '0x6000',
+    )
+    const sdk = createNftxSdk({
+      publicClient: f.publicClient,
+      walletClient: f.walletClient,
+      contracts: { nftxZap: operator },
+    })
+    const result = await sdk.sellNfts({
+      collection: '0xb47e3cd837dDF8e4c57F05d70Ab865de6e193BBB',
+      tokenIds: [1n],
+      minOut: 1000n,
+    })
+    expect(result.mode === 'submit' && result.state.errorCode).toBe('OPERATOR_NOT_CONTRACT')
+    expect(f.writeContract).not.toHaveBeenCalled()
+  })
   it('buyNfts (floor, submit) quotes-skipped, guards, executes sequentially', async () => {
     const f = fakes()
     const sdk = createNftxSdk({ publicClient: f.publicClient, walletClient: f.walletClient })

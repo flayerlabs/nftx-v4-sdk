@@ -9,6 +9,14 @@ import {
 
 import { collectionTokenAbi } from '../abi/collectionToken'
 import { erc721Abi } from '../abi/erc721'
+import { cryptoPunksAbi } from '../abi/cryptoPunks'
+import { cryptoKittiesAbi } from '../abi/cryptoKitties'
+import {
+  nftStandard,
+  readPunkOffers,
+  readKittyApprovals,
+  type NftApproval,
+} from '../encoders/nftApproval'
 import { listingsAbi } from '../abi/listings'
 import { lockerAbi } from '../abi/locker'
 import { nftxV4HookAbi } from '../abi/nftxV4Hook'
@@ -17,12 +25,10 @@ import { v4QuoterAbi } from '../abi/v4Quoter'
 import { type ContractOverrides, getAddressFor } from '../addresses/resolve'
 import type { ContractKey } from '../addresses/tables'
 import { BUY_QUOTE_BUFFER_BPS, DEFAULT_SLIPPAGE_BPS, ONE_VTOKEN_WEI } from '../constants/pool'
+import { nativeWeiToPoolUnits, poolUnitsToNativeWei, nativeCurrency } from '../math/currency'
 import { Vault } from '../entities/vault'
 import { classifyError, InvalidInputError } from '../errors'
-import {
-  type ListingTermsInput,
-  parseListingTerms,
-} from '../lib/listing'
+import { type ListingTermsInput, parseListingTerms } from '../lib/listing'
 import { parseAddress, parseAddressAllowZero } from '../lib/validate'
 import type { TokenEscrowSource } from '../encoders/escrow'
 import { type BigIntish, toBigInt } from '../math/amount'
@@ -39,6 +45,7 @@ import {
   type QuoteExactSingleParams,
   type TokenSwapSide,
   tokenSwapQuoteParams,
+  tokenSwapExactOutQuoteParams,
 } from '../pool/quoteParams'
 
 export interface ReadNftxSdkConfig {
@@ -109,7 +116,7 @@ export class ReadNftxSdk {
     return getAddressFor(this.chainId, key, this.overrides)
   }
 
-  /** The collection's ERC20 vToken (zero address when not initialized). */
+  /** The collection's ERC20 vToken (zero address before registration). */
   async collectionToken(collection: Address): Promise<Address> {
     return this.publicClient.readContract({
       address: this.addressOf('locker'),
@@ -121,8 +128,12 @@ export class ReadNftxSdk {
 
   /** True when the collection has an initialized NFTX v4 vault. */
   async collectionInitialized(collection: Address): Promise<boolean> {
-    const vToken = await this.collectionToken(collection)
-    return vToken.toLowerCase() !== zeroAddress
+    return this.publicClient.readContract({
+      address: this.addressOf('locker'),
+      abi: lockerAbi,
+      functionName: 'collectionInitialized',
+      args: [parseAddress(collection, 'collection')],
+    })
   }
 
   /** The pool's native pair token (flETH), read from the hook. */
@@ -172,7 +183,7 @@ export class ReadNftxSdk {
     const { verifyPoolKey = true } = options
     const c = parseAddress(collection, 'collection')
     const vToken = await this.collectionToken(c)
-    if (vToken.toLowerCase() === zeroAddress) {
+    if (vToken.toLowerCase() === zeroAddress || !(await this.collectionInitialized(c))) {
       throw new InvalidInputError(`Collection ${c} is not an initialized NFTX v4 vault.`)
     }
     const localKey = nftxV4PoolKey(vToken, this.addressOf('flEth'), this.addressOf('nftxV4Hook'))
@@ -200,6 +211,51 @@ export class ReadNftxSdk {
       functionName: 'isApprovedForAll',
       args: [parseAddress(owner, 'owner'), parseAddress(operator, 'operator')],
     })
+  }
+
+  /** Fresh authorization state for standard ERC721, CryptoPunks or CryptoKitties. */
+  async nftApproval(
+    collection: Address,
+    owner: Address,
+    operator: Address,
+    tokenIds: readonly BigIntish[],
+  ): Promise<NftApproval> {
+    const address = parseAddress(collection, 'collection')
+    const kind = nftStandard(address)
+    if (kind === 'erc721') {
+      return { kind, isApprovedForAll: await this.isApprovedForAll(address, owner, operator) }
+    }
+    if (kind === 'punks') {
+      return {
+        kind,
+        verdicts: await readPunkOffers({
+          tokenIds,
+          owner,
+          operator,
+          readOffer: (tokenId) =>
+            this.publicClient.readContract({
+              address,
+              abi: cryptoPunksAbi,
+              functionName: 'punksOfferedForSale',
+              args: [tokenId],
+            }),
+        }),
+      }
+    }
+    return {
+      kind,
+      verdicts: await readKittyApprovals({
+        tokenIds,
+        operator,
+        readApproved: (tokenId) =>
+          this.publicClient.readContract({
+            address,
+            abi: cryptoKittiesAbi,
+            functionName: 'kittyIndexToApproved',
+            args: [tokenId],
+          }),
+      }),
+    }
   }
 
   /** ERC20 allowance of `owner` to `spender` for `token`. */
@@ -232,10 +288,7 @@ export class ReadNftxSdk {
       address: this.addressOf(source),
       abi: tokenEscrowAbi,
       functionName: 'balances',
-      args: [
-        parseAddress(account, 'account'),
-        parseAddressAllowZero(token, 'token'),
-      ],
+      args: [parseAddress(account, 'account'), parseAddressAllowZero(token, 'token')],
     })
   }
 
@@ -293,10 +346,11 @@ export class ReadNftxSdk {
     const n = toBigInt(count, 'count')
     if (n <= 0n) throw new InvalidInputError('count must be greater than zero.')
     const vault = await this.vaultFor(c, opts?.vault)
-    return this.simulateQuote(
+    const amountIn = await this.simulateQuote(
       'quoteExactOutputSingle',
       floorBuyQuoteParams(vault.poolKey, vault.collectionToken, n),
     )
+    return poolUnitsToNativeWei(this.chainId, amountIn)
   }
 
   /** Floor-buy cost plus a `maxSpend` cap (buffer headroom; the zap refunds overage). */
@@ -321,10 +375,11 @@ export class ReadNftxSdk {
     const c = parseAddress(collection, 'collection')
     const amount = toBigInt(tokensOutWei, 'tokensOutWei')
     const vault = await this.vaultFor(c, opts?.vault)
-    return this.simulateQuote(
+    const amountIn = await this.simulateQuote(
       'quoteExactOutputSingle',
       tokenBuyCostQuoteParams(vault.poolKey, vault.collectionToken, amount),
     )
+    return poolUnitsToNativeWei(this.chainId, amountIn)
   }
 
   /** Arbitrary exact-output token cost plus a slippage-safe max-spend cap. */
@@ -350,15 +405,11 @@ export class ReadNftxSdk {
     const n = toBigInt(count, 'count')
     if (n <= 0n) throw new InvalidInputError('count must be greater than zero.')
     const vault = await this.vaultFor(c, opts?.vault)
-    return this.simulateQuote(
+    const amountOut = await this.simulateQuote(
       'quoteExactInputSingle',
-      floorSellQuoteParams(
-        vault.poolKey,
-        vault.collectionToken,
-        this.addressOf('flEth'),
-        n,
-      ),
+      floorSellQuoteParams(vault.poolKey, vault.collectionToken, this.addressOf('flEth'), n),
     )
+    return poolUnitsToNativeWei(this.chainId, amountOut)
   }
 
   /** NFT-sell payout plus a slippage-floored `minOut`. */
@@ -384,16 +435,44 @@ export class ReadNftxSdk {
     const amount = toBigInt(amountIn, 'amountIn')
     if (amount <= 0n) throw new InvalidInputError('amountIn must be greater than zero.')
     const vault = await this.vaultFor(c, opts?.vault)
-    return this.simulateQuote(
+    const amountOut = await this.simulateQuote(
       'quoteExactInputSingle',
       tokenSwapQuoteParams(
         side,
         vault.poolKey,
         vault.collectionToken,
         this.addressOf('flEth'),
-        amount,
+        side === 'buy' ? nativeWeiToPoolUnits(this.chainId, amount) : amount,
       ),
     )
+    return side === 'sell' ? poolUnitsToNativeWei(this.chainId, amountOut) : amountOut
+  }
+
+  /** Required input for an exact-output quote; native amounts use 18 decimals. */
+  async quoteTokenSwapExactOut(
+    side: TokenSwapSide,
+    collection: Address,
+    amountOut: BigIntish,
+    opts?: { vault?: Vault },
+  ): Promise<bigint> {
+    const c = parseAddress(collection, 'collection')
+    const amount = toBigInt(amountOut, 'amountOut')
+    if (amount <= 0n) throw new InvalidInputError('amountOut must be greater than zero.')
+    // Round native output up to the next pool unit so the quote covers the requested minimum.
+    const scale = nativeCurrency(this.chainId).poolScale
+    const exactAmount = side === 'sell' ? (amount + scale - 1n) / scale : amount
+    const vault = await this.vaultFor(c, opts?.vault)
+    const amountIn = await this.simulateQuote(
+      'quoteExactOutputSingle',
+      tokenSwapExactOutQuoteParams(
+        side,
+        vault.poolKey,
+        vault.collectionToken,
+        this.addressOf('flEth'),
+        exactAmount,
+      ),
+    )
+    return side === 'buy' ? poolUnitsToNativeWei(this.chainId, amountIn) : amountIn
   }
 
   /** Token-swap output plus a slippage-floored `minOut`. */
